@@ -1,103 +1,130 @@
-# login_utils.py
+import time
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-import base64, sys
 
-def _try_click_overlays(driver):
-    # banners comuns de cookies / modais
-    candidatos = [
-        "//button[contains(translate(., 'ACEITAR', 'aceitar'), 'aceitar')]",
-        "//button[contains(translate(., 'OK', 'ok'), 'ok')]",
-        "//button[contains(., 'Entendi')]",
-        "//button[contains(., 'Prosseguir')]",
-        "//div[@role='dialog']//button[1]"
+def wait_cf_challenge(driver, max_wait=90):
+    """Espera e tenta acionar o desafio do Cloudflare.
+       Retorna True se a página sair do “Just a moment…”, False se expirar."""
+    start = time.time()
+    while time.time() - start < max_wait:
+        html = driver.page_source.lower()
+
+        bloqueado = (
+            "just a moment" in html or
+            "verify you are human" in html or
+            "cloudflare" in html or
+            "verifique que você é humano" in html or
+            "verificar" in html
+        )
+        if not bloqueado:
+            return True
+
+        # tenta clicar em botões/inputs de verificação quando existirem
+        for xp in [
+            "//button[contains(., 'Verify') or contains(., 'Verificar') or contains(., 'Sou humano')]",
+            "//input[@type='submit' and (contains(@value,'Verify') or contains(@value,'Verificar'))]",
+            "//div[@id='challenge-stage']//button",
+        ]:
+            try:
+                el = driver.find_element(By.XPATH, xp)
+                el.click()
+                time.sleep(2)
+                break
+            except Exception:
+                pass
+
+        # dá um respiro e tenta de novo
+        time.sleep(2)
+
+    return False
+
+def smart_login(driver, email, senha, wait_seconds=40):
+    driver.get("https://www.bling.com.br/login")
+    w = WebDriverWait(driver, wait_seconds)
+
+    # 1) Cloudflare
+    if not wait_cf_challenge(driver, max_wait=90):
+        raise TimeoutException("Bloqueado pelo Cloudflare (não consegui passar o desafio).")
+
+    # 2) alguns logins vêm dentro de iframe
+    try:
+        ifr = driver.find_element(By.CSS_SELECTOR, "iframe")
+        driver.switch_to.frame(ifr)
+    except Exception:
+        pass
+
+    # 3) usuário
+    locators_user = [
+        (By.CSS_SELECTOR, "input[type='email']"),
+        (By.CSS_SELECTOR, "input#login"),
+        (By.CSS_SELECTOR, "input[name='username']"),
+        (By.CSS_SELECTOR, "input#username"),
+        (By.XPATH, "//input[contains(@placeholder,'e-mail') or contains(@placeholder,'email')]"),
     ]
-    for xp in candidatos:
+    field_user = None
+    for how, sel in locators_user:
         try:
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xp))).click()
+            field_user = w.until(EC.visibility_of_element_located((how, sel)))
+            if field_user:
+                break
+        except TimeoutException:
+            continue
+    if not field_user:
+        raise TimeoutException("Campo de usuário não encontrado em nenhum seletor")
+    field_user.clear(); field_user.send_keys(email)
+
+    # 4) Avançar/enviar
+    for xp in [
+        "//button[@type='submit']",
+        "//button[contains(., 'Entrar')]",
+        "//button[contains(., 'Continuar')]",
+        "//button[contains(., 'Acessar')]",
+    ]:
+        try:
+            driver.find_element(By.XPATH, xp).click()
+            time.sleep(1)
             break
         except Exception:
             pass
 
-def _switch_to_iframe_if_needed(driver):
-    # tenta achar o campo dentro de iframes
-    iframes = driver.find_elements(By.TAG_NAME, "iframe")
-    for i, f in enumerate(iframes):
-        try:
-            driver.switch_to.default_content()
-            driver.switch_to.frame(f)
-            # se achar um input, fica nesse frame
-            if driver.find_elements(By.TAG_NAME, "input"):
-                return True
-        except Exception:
-            continue
-    driver.switch_to.default_content()
-    return False
-
-def smart_login(driver, email, password, wait_seconds=30):
-    _try_click_overlays(driver)
-    _switch_to_iframe_if_needed(driver)
-
-    wait = WebDriverWait(driver, wait_seconds)
-
-    # vários seletores possíveis para usuário e senha
-    user_selectors = [
-        (By.ID, "username"),
-        (By.NAME, "username"),
-        (By.NAME, "email"),
-        (By.CSS_SELECTOR, "input[type='email']"),
-        (By.CSS_SELECTOR, "input[autocomplete='username']")
-    ]
-    pass_selectors = [
-        (By.ID, "password"),
-        (By.NAME, "password"),
+    # 5) senha
+    field_pass = None
+    for how, sel in [
         (By.CSS_SELECTOR, "input[type='password']"),
-        (By.CSS_SELECTOR, "input[autocomplete='current-password']")
-    ]
-
-    user_el = None
-    for sel in user_selectors:
+        (By.CSS_SELECTOR, "input#password"),
+        (By.CSS_SELECTOR, "input[name='password']"),
+    ]:
         try:
-            user_el = wait.until(EC.presence_of_element_located(sel))
-            break
+            field_pass = w.until(EC.visibility_of_element_located((how, sel)))
+            if field_pass:
+                break
         except TimeoutException:
             continue
-
-    if not user_el:
-        raise TimeoutException("Campo de usuário não encontrado em nenhum seletor")
-
-    user_el.clear()
-    user_el.send_keys(email + Keys.TAB)
-
-    pass_el = None
-    for sel in pass_selectors:
-        try:
-            pass_el = wait.until(EC.presence_of_element_located(sel))
-            break
-        except TimeoutException:
-            continue
-
-    if not pass_el:
+    if not field_pass:
         raise TimeoutException("Campo de senha não encontrado em nenhum seletor")
+    field_pass.clear(); field_pass.send_keys(senha)
 
-    pass_el.clear()
-    pass_el.send_keys(password + Keys.ENTER)
+    # 6) enviar
+    for xp in [
+        "//button[@type='submit']",
+        "//button[contains(., 'Entrar')]",
+        "//button[contains(., 'Acessar')]",
+    ]:
+        try:
+            driver.find_element(By.XPATH, xp).click()
+            break
+        except Exception:
+            pass
 
-def dump_debug(driver, label="DEBUG"):
+    # 7) pós-login (melhor esforço)
     try:
-        url = driver.current_url
-        title = driver.title
-        body_text = driver.find_element(By.TAG_NAME, "body").text[:800]
-        png_b64 = driver.get_screenshot_as_base64()
-        print(f"===== {label} =====")
-        print(f"URL atual: {url}")
-        print(f"Título: {title}")
-        print(f"Trecho do body: {body_text}")
-        print(f"(Screenshot base64 iniciado) data:image/png;base64,{png_b64[:200]}... (cortado)")
-        print("====================")
-        sys.stdout.flush()
-    except Exception as e:
-        print(f"[dump_debug] falhou: {e}")
+        w.until(EC.any_of(
+            EC.url_contains("/home"),
+            EC.url_contains("/dashboard"),
+            EC.presence_of_element_located((By.XPATH, "//*[contains(., 'Bem-vindo') or contains(., 'Início')]")),
+        ))
+    except TimeoutException:
+        # deixa o caller decidir se considera ok
+        pass
