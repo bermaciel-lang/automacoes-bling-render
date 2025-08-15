@@ -1,22 +1,21 @@
-import shutil
+# selenium_setup.py
+import os
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
 def build_driver():
-    chrome_path = shutil.which("chromium") or "/usr/bin/chromium"
-    driver_path = shutil.which("chromedriver") or "/usr/bin/chromedriver"
-
     opts = Options()
+    # usa o Chromium instalado via apt
+    opts.binary_location = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
+    # flags para rodar no container
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1920,1080")
-    # Opcional: idioma
-    opts.add_argument("--lang=pt-BR")
-    if chrome_path:
-        opts.binary_location = chrome_path
 
-    # Selenium 4: use Service() in ideal world, but keep compatibility by passing executable_path
-    driver = webdriver.Chrome(executable_path=driver_path, options=opts)
+    # usa o chromedriver do pacote chromium-driver
+    driver_path = os.environ.get("CHROMEDRIVER", "/usr/bin/chromedriver")
+    service = Service(driver_path)
+
+    driver = webdriver.Chrome(service=service, options=opts)
     return driver
