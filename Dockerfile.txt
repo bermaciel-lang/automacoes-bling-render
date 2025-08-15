@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+# Instalar Chromium e Chromedriver
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium chromium-driver fonts-liberation tzdata ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Deixar Selenium localizar os binários
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROMEDRIVER=/usr/bin/chromedriver
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Dependências Python
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Código
+COPY . /app
+
+# Comando padrão (pode ser alterado no Render Cron Job)
+CMD ["python", "bling_3m_v2.py"]
