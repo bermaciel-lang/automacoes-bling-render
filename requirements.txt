@@ -8,3 +8,4 @@ google-auth-oauthlib==1.2.1
 pandas==2.2.2
 lxml==5.2.2
 beautifulsoup4==4.12.3
+undetected-chromedriver
